@@ -66,10 +66,12 @@ class Voxel {
 
 /////////////////////////////////////////////////////////////////
 
-void read_data_stream(CRSCoord *coords, Voxel *voxels)
+int read_data_stream(CRSCoord *coords, Voxel *voxels)
 {
     FILE *fcor = fopen("../../data/stream/coords.dat", "rb");
     FILE *fvxl = fopen("../../data/stream/voxels.dat", "rb");
+
+    const int total_size = BATCH_SIZE * imgsize * VERTICES;
 
     steady_clock::time_point begin = steady_clock::now();
 
@@ -78,7 +80,7 @@ void read_data_stream(CRSCoord *coords, Voxel *voxels)
                   sizeof(CRSCoord),
                   BATCH_SIZE * imgsize * VERTICES,
                   fcor)
-            == BATCH_SIZE * imgsize * VERTICES) {
+            == total_size) {
             fclose(fcor);
         } else {
             std::cout << "coords.dat read error!\n";
@@ -89,7 +91,7 @@ void read_data_stream(CRSCoord *coords, Voxel *voxels)
                   sizeof(Voxel),
                   BATCH_SIZE * imgsize * VERTICES,
                   fvxl)
-            == BATCH_SIZE * imgsize * VERTICES) {
+            == total_size) {
             fclose(fvxl);
         } else {
             std::cout << "voxels.dat read error!\n";
@@ -105,6 +107,47 @@ void read_data_stream(CRSCoord *coords, Voxel *voxels)
     std::cout << "Data reading done! time consumed: "
               << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()
               << "ms" << std::endl;
+
+    return total_size;
+}
+
+void statistic(CRSCoord *coords, Voxel *voxels, int length)
+{
+    int segment = 0, counter = 1;
+
+    int current = 0, next;
+    while (current < length) {
+        next = current < length - 1 ? current + 1 : current;
+
+        if (next != current && coords[next] == coords[current]) {
+            counter++;
+        } else {
+            printf("Segment No.%8d: length %8d\n", segment, counter);
+
+            segment++;
+            counter = 1;
+        }
+
+        current = next;
+    }
+}
+
+/////////////////////////////////////////////////////////////////
+
+__global__ void kernel_reduce(CRSCoord *dev_cors,
+                              Voxel *dev_vxls,
+                              CRSCoord *dev_r_cors,
+                              Voxel *dev_r_vxls)
+{
+    ;
+}
+
+/////////////////////////////////////////////////////////////////
+
+void partial_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
+                    CRSCoord *raw_r_dev_cors, Voxel *raw_r_dev_vxls)
+{
+    ;
 }
 
 void thrust_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
@@ -136,6 +179,7 @@ void thrust_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
                                            reduced_vxls);
 
         cudaEventRecord(time_end);
+
     } catch (thrust::system_error e) {
         std::cout << "Error detected in reduce by key: "
                   << e.what() << std::endl;
@@ -151,6 +195,8 @@ void thrust_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
     std::cout << "Thrust reduce done with time consumed: "
               << milliseconds << "ms" << std::endl;
 }
+
+/////////////////////////////////////////////////////////////////
 
 int main(int argc, char *argv[])
 {
@@ -179,10 +225,16 @@ int main(int argc, char *argv[])
     cudaCheckErrors("Memory allocation");
 
     /* data reading */
-    read_data_stream(coords, voxels);
+    int length = read_data_stream(coords, voxels);
+
+    /* analysis */
+    statistic(coords, voxels, length);
 
     /* thrust reduce */
     thrust_reduce(raw_dev_cors, raw_dev_vxls, raw_r_dev_cors, raw_r_dev_vxls);
+
+    /* partial reduce */
+    // TODO
 
     /* clean up */
     cudaFreeHost(coords);
