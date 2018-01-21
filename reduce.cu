@@ -6,7 +6,11 @@
 #include <cuda.h>
 
 #include <iostream>
+#include <chrono>
 #include <cstdlib>
+
+using std::chrono::steady_clock;
+using std::chrono::steady_clock;
 
 /////////////////////////////////////////////////////////////////
 
@@ -14,6 +18,18 @@
 #define VERTICES   8
 
 const int imgsize = 500 * (500 / 2 + 1);
+
+#define cudaCheckErrors(msg) \
+    do { \
+        cudaError_t __err = cudaGetLastError(); \
+        if (__err != cudaSuccess) { \
+            fprintf(stderr, "Fatal error: %s (%s at %s:%d)\n", \
+                msg, cudaGetErrorString(__err), \
+                __FILE__, __LINE__); \
+            fprintf(stderr, "*** FAILED - ABORTING\n"); \
+            exit(1); \
+        } \
+    } while (0)
 
 /////////////////////////////////////////////////////////////////
 
@@ -55,6 +71,8 @@ void read_data_stream(CRSCoord *coords, Voxel *voxels)
     FILE *fcor = fopen("../../data/stream/coords.dat", "rb");
     FILE *fvxl = fopen("../../data/stream/voxels.dat", "rb");
 
+    steady_clock::time_point begin = steady_clock::now();
+
     if (fcor && fvxl) {
         if (fread(coords,
                   sizeof(CRSCoord),
@@ -77,10 +95,16 @@ void read_data_stream(CRSCoord *coords, Voxel *voxels)
             std::cout << "voxels.dat read error!\n";
             exit(1);
         }
+
     } else {
         std::cout << "file open error!\n";
         exit(2);
     }
+
+    steady_clock::time_point end = steady_clock::now();
+    std::cout << "Data reading done! time consumed: "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()
+              << "ms" << std::endl;
 }
 
 void thrust_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
@@ -97,17 +121,35 @@ void thrust_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
     reduce_end.first  = reduced_cors;
     reduce_end.second = reduced_vxls;
 
+    cudaEvent_t time_start, time_end;
+
+    cudaEventCreate(&time_start);
+    cudaEventCreate(&time_end);
+
     try {
+        cudaEventRecord(time_start);
+
         reduce_end = thrust::reduce_by_key(dev_cors,
                                            dev_cors + BATCH_SIZE * imgsize * VERTICES,
                                            dev_vxls,
                                            reduced_cors,
                                            reduced_vxls);
+
+        cudaEventRecord(time_end);
     } catch (thrust::system_error e) {
         std::cout << "Error detected in reduce by key: "
                   << e.what() << std::endl;
         exit(1);
     }
+    
+    cudaEventSynchronize(time_end);
+    cudaCheckErrors("event sync");
+    
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, time_start, time_end); 
+
+    std::cout << "Thrust reduce done with time consumed: "
+              << milliseconds << "ms" << std::endl;
 }
 
 int main(int argc, char *argv[])
@@ -133,6 +175,8 @@ int main(int argc, char *argv[])
                BATCH_SIZE * imgsize * VERTICES * sizeof(CRSCoord));
     cudaMalloc((void**)&raw_r_dev_vxls,
                BATCH_SIZE * imgsize * VERTICES * sizeof(Voxel));
+
+    cudaCheckErrors("Memory allocation");
 
     /* data reading */
     read_data_stream(coords, voxels);
