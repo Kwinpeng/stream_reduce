@@ -128,7 +128,7 @@ void statistic(CRSCoord *coords, Voxel *voxels, int length)
             counter = 1;
         }
 
-        current = next;
+        current++;
     }
 }
 
