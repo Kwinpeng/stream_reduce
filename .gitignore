@@ -1,3 +1,5 @@
 reduce
 
 *.log
+
+*.o

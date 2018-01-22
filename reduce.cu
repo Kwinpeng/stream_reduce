@@ -1,3 +1,5 @@
+#include "kernels/reducebykey.cuh"
+
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/system_error.h>
@@ -11,6 +13,8 @@
 
 using std::chrono::steady_clock;
 using std::chrono::steady_clock;
+
+using namespace mgpu;
 
 /////////////////////////////////////////////////////////////////
 
@@ -34,6 +38,7 @@ const int imgsize = 500 * (500 / 2 + 1);
 /////////////////////////////////////////////////////////////////
 
 typedef int CRSCoord;
+//typedef double Voxel;
 
 class Voxel {
     public:
@@ -135,9 +140,9 @@ void statistic(CRSCoord *coords, Voxel *voxels, int length)
 /////////////////////////////////////////////////////////////////
 
 __global__ void kernel_reduce(CRSCoord *dev_cors,
-                              Voxel *dev_vxls,
+                              Voxel    *dev_vxls,
                               CRSCoord *dev_r_cors,
-                              Voxel *dev_r_vxls)
+                              Voxel    *dev_r_vxls)
 {
     ;
 }
@@ -148,6 +153,34 @@ void partial_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
                     CRSCoord *raw_r_dev_cors, Voxel *raw_r_dev_vxls)
 {
     ;
+}
+
+void mgpu_reduce(int argc,                 char *argv[],
+                 CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
+                 CRSCoord *raw_r_dev_cors, Voxel *raw_r_dev_vxls)
+{
+    int *counts;
+
+	ContextPtr context = CreateCudaDevice(argc, argv, true);
+
+    cudaMalloc((void**)&counts, sizeof(int));
+
+	context->Start();
+    ReduceByKey(raw_dev_cors,
+                raw_dev_vxls,
+                BATCH_SIZE * imgsize * VERTICES,
+                Voxel(),
+                mgpu::plus<Voxel>(),
+                mgpu::equal_to<CRSCoord>(),
+                raw_r_dev_cors,
+                raw_r_dev_vxls,
+                (int*)0,
+                counts,
+                *context);
+	double milliseconds = context->Split();
+
+    std::cout << "MGPU reduce done with time consumed: "
+              << milliseconds << "ms" << std::endl;
 }
 
 void thrust_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
@@ -228,10 +261,13 @@ int main(int argc, char *argv[])
     int length = read_data_stream(coords, voxels);
 
     /* analysis */
-    statistic(coords, voxels, length);
+    //statistic(coords, voxels, length);
 
     /* thrust reduce */
     thrust_reduce(raw_dev_cors, raw_dev_vxls, raw_r_dev_cors, raw_r_dev_vxls);
+
+    /* mgpu reduce */
+    mgpu_reduce(argc, argv, raw_dev_cors, raw_dev_vxls, raw_r_dev_cors, raw_r_dev_vxls);
 
     /* partial reduce */
     // TODO
