@@ -38,36 +38,36 @@ const int imgsize = 500 * (500 / 2 + 1);
 /////////////////////////////////////////////////////////////////
 
 typedef int CRSCoord;
-//typedef double Voxel;
+typedef double Voxel;
 
-class Voxel {
-    public:
-        __host__ __device__ __forceinline__
-        Voxel(double r = 0, double i = 0, double w = 0) {
-            real = r; imag = i; weit = w;
-        }
-
-        __host__ __device__ __forceinline__
-        Voxel operator+(const Voxel& that) const {
-            return Voxel(real + that.real,
-                         imag + that.imag,
-                         weit + that.weit);
-        }
-
-        __host__ __device__ __forceinline__
-        Voxel& operator+=(const Voxel& that) {
-            real += that.real;
-            imag += that.imag;
-            weit += that.weit;
-            
-            return *this;
-        }
-
-    public:
-        double real;
-        double imag;
-        double weit;
-};
+//class Voxel {
+//    public:
+//        __host__ __device__ __forceinline__
+//        Voxel(double r = 0, double i = 0, double w = 0) {
+//            real = r; imag = i; weit = w;
+//        }
+//
+//        __host__ __device__ __forceinline__
+//        Voxel operator+(const Voxel& that) const {
+//            return Voxel(real + that.real,
+//                         imag + that.imag,
+//                         weit + that.weit);
+//        }
+//
+//        __host__ __device__ __forceinline__
+//        Voxel& operator+=(const Voxel& that) {
+//            real += that.real;
+//            imag += that.imag;
+//            weit += that.weit;
+//            
+//            return *this;
+//        }
+//
+//    public:
+//        double real;
+//        double imag;
+//        double weit;
+//};
 
 /////////////////////////////////////////////////////////////////
 
@@ -108,12 +108,42 @@ int read_data_stream(CRSCoord *coords, Voxel *voxels)
         exit(2);
     }
 
+    //for (int i = 0; i < total_size; ++i)
+    //    printf("coord:%10d, voxel:%15.6f\n", coords[i], voxels[i]);
+
     steady_clock::time_point end = steady_clock::now();
     std::cout << "Data reading done! time consumed: "
               << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()
               << "ms" << std::endl;
 
     return total_size;
+}
+
+void record(CRSCoord *coords, CRSCoord *dev_coords,
+            Voxel    *voxels, Voxel    *dev_voxels,
+            const int length, const char *filename)
+{
+    FILE *fp = fopen(filename, "w");
+
+    if (fp == NULL) {
+        printf("File %s open error!\n", filename);
+        exit(1);
+    }
+
+    cudaMemcpy(coords,
+               dev_coords,
+               length * sizeof(CRSCoord),
+               cudaMemcpyDeviceToHost);
+    cudaMemcpy(voxels,
+               dev_voxels,
+               length * sizeof(Voxel),
+               cudaMemcpyDeviceToHost);
+
+    for (int i = 0; i < length; ++i) {
+        fprintf(fp, "coord:%10d, voxel:%15.6f\n", coords[i], voxels[i]);
+    }
+
+    fclose(fp);
 }
 
 void statistic(CRSCoord *coords, Voxel *voxels, int length)
@@ -155,17 +185,14 @@ void partial_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
     ;
 }
 
-void mgpu_reduce(int argc,                 char *argv[],
-                 CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
-                 CRSCoord *raw_r_dev_cors, Voxel *raw_r_dev_vxls)
+int mgpu_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
+                CRSCoord *raw_r_dev_cors, Voxel *raw_r_dev_vxls,
+                CudaContext& context)
 {
     int *counts;
-
-	ContextPtr context = CreateCudaDevice(argc, argv, true);
-
     cudaMalloc((void**)&counts, sizeof(int));
 
-	context->Start();
+	context.Start();
     ReduceByKey(raw_dev_cors,
                 raw_dev_vxls,
                 BATCH_SIZE * imgsize * VERTICES,
@@ -176,15 +203,20 @@ void mgpu_reduce(int argc,                 char *argv[],
                 raw_r_dev_vxls,
                 (int*)0,
                 counts,
-                *context);
-	double milliseconds = context->Split();
+                context);
+	double milliseconds = context.Split();
 
     std::cout << "MGPU reduce done with time consumed: "
               << milliseconds << "ms" << std::endl;
+
+    int retrieval = 0;
+    cudaMemcpy(&retrieval, counts, sizeof(int), cudaMemcpyDeviceToHost);
+
+    return retrieval;
 }
 
-void thrust_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
-                   CRSCoord *raw_r_dev_cors, Voxel *raw_r_dev_vxls)
+int thrust_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
+                  CRSCoord *raw_r_dev_cors, Voxel *raw_r_dev_vxls)
 {
     thrust::device_ptr<CRSCoord> dev_cors(raw_dev_cors);
     thrust::device_ptr<Voxel>    dev_vxls(raw_dev_vxls);
@@ -227,34 +259,37 @@ void thrust_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
 
     std::cout << "Thrust reduce done with time consumed: "
               << milliseconds << "ms" << std::endl;
+
+    return thrust::distance(reduced_cors, reduce_end.first);
 }
 
 /////////////////////////////////////////////////////////////////
 
 int main(int argc, char *argv[])
 {
-    CRSCoord *coords, *raw_dev_cors, *raw_r_dev_cors;
-    Voxel    *voxels, *raw_dev_vxls, *raw_r_dev_vxls;
+    CRSCoord *coords, *r_coords, *raw_dev_cors, *raw_r_dev_cors;
+    Voxel    *voxels, *r_voxels, *raw_dev_vxls, *raw_r_dev_vxls;
+
+    const int size = BATCH_SIZE * imgsize * VERTICES;
 
     /* host buffer */
-    cudaHostAlloc((void**)&coords,
-                  BATCH_SIZE * imgsize * VERTICES * sizeof(CRSCoord),
+    cudaHostAlloc((void**)&coords, size * sizeof(CRSCoord),
                   cudaHostAllocDefault);
-    cudaHostAlloc((void**)&voxels,
-                  BATCH_SIZE * imgsize * VERTICES * sizeof(Voxel),
+    cudaHostAlloc((void**)&voxels, size * sizeof(Voxel),
+                  cudaHostAllocDefault);
+
+    /* reduction result for verification */
+    cudaHostAlloc((void**)&r_coords, size * sizeof(CRSCoord),
+                  cudaHostAllocDefault);
+    cudaHostAlloc((void**)&r_voxels, size * sizeof(Voxel),
                   cudaHostAllocDefault);
 
     /* on device buffer */
-    cudaMalloc((void**)&raw_dev_cors,
-               BATCH_SIZE * imgsize * VERTICES * sizeof(CRSCoord));
-    cudaMalloc((void**)&raw_dev_vxls,
-               BATCH_SIZE * imgsize * VERTICES * sizeof(Voxel));
+    cudaMalloc((void**)&raw_dev_cors, size * sizeof(CRSCoord));
+    cudaMalloc((void**)&raw_dev_vxls, size * sizeof(Voxel));
 
-    cudaMalloc((void**)&raw_r_dev_cors,
-               BATCH_SIZE * imgsize * VERTICES * sizeof(CRSCoord));
-    cudaMalloc((void**)&raw_r_dev_vxls,
-               BATCH_SIZE * imgsize * VERTICES * sizeof(Voxel));
-
+    cudaMalloc((void**)&raw_r_dev_cors, size * sizeof(CRSCoord));
+    cudaMalloc((void**)&raw_r_dev_vxls, size * sizeof(Voxel));
     cudaCheckErrors("Memory allocation");
 
     /* data reading */
@@ -262,12 +297,38 @@ int main(int argc, char *argv[])
 
     /* analysis */
     //statistic(coords, voxels, length);
+    
+    /* upload data */
+    cudaMemcpy(raw_dev_cors,
+               coords,
+               length * sizeof(CRSCoord),
+               cudaMemcpyHostToDevice);
+    cudaMemcpy(raw_dev_vxls,
+               voxels,
+               length * sizeof(Voxel),
+               cudaMemcpyHostToDevice);
+    cudaCheckErrors("Memory copy h2d");
 
     /* thrust reduce */
-    thrust_reduce(raw_dev_cors, raw_dev_vxls, raw_r_dev_cors, raw_r_dev_vxls);
+    int tlen = thrust_reduce(raw_dev_cors, raw_dev_vxls,
+                             raw_r_dev_cors, raw_r_dev_vxls);
+
+    record(r_coords, raw_r_dev_cors,
+           r_voxels, raw_r_dev_vxls,
+           tlen, "thrust-result.txt");
 
     /* mgpu reduce */
-    mgpu_reduce(argc, argv, raw_dev_cors, raw_dev_vxls, raw_r_dev_cors, raw_r_dev_vxls);
+	ContextPtr context = CreateCudaDevice(argc, argv, true);
+
+    int mlen = mgpu_reduce(raw_dev_cors, raw_dev_vxls,
+                           raw_r_dev_cors, raw_r_dev_vxls, *context);
+
+    record(r_coords, raw_r_dev_cors,
+           r_voxels, raw_r_dev_vxls,
+           mlen, "mgpu-result.txt");
+
+    if (tlen != mlen)
+        printf("reduced length not equal, thrust: %d, mgpu: %d\n", tlen, mlen);
 
     /* partial reduce */
     // TODO
@@ -275,6 +336,9 @@ int main(int argc, char *argv[])
     /* clean up */
     cudaFreeHost(coords);
     cudaFreeHost(voxels);
+
+    cudaFreeHost(r_coords);
+    cudaFreeHost(r_voxels);
 
     cudaFree(raw_dev_cors);
     cudaFree(raw_dev_vxls);

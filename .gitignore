@@ -1,5 +1,9 @@
-reduce
+Reduce
 
 *.log
 
 *.o
+
+*.txt
+
+*.diff
