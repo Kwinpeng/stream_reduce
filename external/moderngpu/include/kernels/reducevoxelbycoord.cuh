@@ -99,8 +99,15 @@ MGPU_HOST void ReduceVoxelByCoord(KeysIt keys_global, InputIt data_global, int c
             copyDtoH(count_host, count_global, 1);
     }
 
+    // Evaluate the segmented reduction in section
+    for (int sec = 0; sec < 3; ++sec) {
+        InputIt data_section = data_global + sec * count;
+        DestIt  dest_section = dest_global + sec * count;
+        SegReduceApply(*data, data_section, identity, op, dest_section, context);
+    }
+
     // Evaluate the segmented reduction.
-    SegReduceApply(*data, data_global, identity, op, dest_global, context);
+    //SegReduceApply(*data, data_global, identity, op, dest_global, context);
 
     // Retrieve the number of segments.
     if(AsyncTransfer && count_host) {

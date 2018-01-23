@@ -146,8 +146,11 @@ void voxels_reshape(Voxel *voxels)
 
 void record(CRSCoord *coords, CRSCoord *dev_coords,
             Voxel    *voxels, Voxel    *dev_voxels,
-            const int length, const char *filename)
+            const int length, const char *filename,
+            bool transpose = false)
 {
+    const int total_size = BATCH_SIZE * imgsize * VERTICES;
+
     FILE *fp = fopen(filename, "w");
 
     if (fp == NULL) {
@@ -161,11 +164,22 @@ void record(CRSCoord *coords, CRSCoord *dev_coords,
                cudaMemcpyDeviceToHost);
     cudaMemcpy(voxels,
                dev_voxels,
-               length * sizeof(Voxel),
+               total_size * sizeof(Voxel),
                cudaMemcpyDeviceToHost);
+    cudaCheckErrors("offload voxel stream");
 
-    for (int i = 0; i < length; ++i) {
-        fprintf(fp, "coord:%10d, voxel:%15.6f\n", coords[i], voxels[i].real);
+    if (!transpose) {
+        for (int i = 0; i < length; ++i) {
+            fprintf(fp, "coord:%12d, voxel:(%15.6f,%15.6f,%15.6f)\n",
+                        coords[i], voxels[i].real, voxels[i].imag, voxels[i].weit);
+        }
+    }else {
+        double *temp = (double*)voxels;
+        for (int i = 0; i < length; ++i) {
+            fprintf(fp, "coord:%12d, voxel:(%15.6f,%15.6f,%15.6f)\n",
+                        coords[i], temp[i], temp[total_size + i],
+                        temp[total_size * 2 + i]);
+        }
     }
 
     fclose(fp);
@@ -332,9 +346,11 @@ int main(int argc, char *argv[])
                voxels,
                length * sizeof(Voxel),
                cudaMemcpyHostToDevice);
-    cudaCheckErrors("Memory copy h2d");
+    cudaCheckErrors("Memory copy H2D");
 
-    /* thrust reduce */
+    /* ---------------------------------------------------- *
+     * thrust reduce
+     * ---------------------------------------------------- */
     int tlen = thrust_reduce(raw_dev_cors, raw_dev_vxls,
                              raw_r_dev_cors, raw_r_dev_vxls);
 
@@ -342,10 +358,18 @@ int main(int argc, char *argv[])
            r_voxels, raw_r_dev_vxls,
            tlen, "thrust-result.txt");
 
-    /* mgpu reduce */
+    /* ---------------------------------------------------- *
+     * mgpu reduce
+     * ---------------------------------------------------- */
 	ContextPtr context = CreateCudaDevice(argc, argv, true);
 
+    /* reshape and re-upload */
     voxels_reshape(voxels);
+    cudaMemcpy(raw_dev_vxls,
+               voxels,
+               length * sizeof(Voxel),
+               cudaMemcpyHostToDevice);
+    cudaCheckErrors("Memory copy H2D after reshape");
 
     int mlen = mgpu_reduce(raw_dev_cors,
                            (double*)raw_dev_vxls,
@@ -355,12 +379,14 @@ int main(int argc, char *argv[])
 
     record(r_coords, raw_r_dev_cors,
            r_voxels, raw_r_dev_vxls,
-           mlen, "mgpu-result.txt");
+           mlen, "mgpu-result.txt", true);
 
     if (tlen != mlen)
         printf("reduced length not equal, thrust: %d, mgpu: %d\n", tlen, mlen);
 
-    /* partial reduce */
+    /* ---------------------------------------------------- *
+     * partial reduce
+     * ---------------------------------------------------- */
     // TODO
 
     /* clean up */
