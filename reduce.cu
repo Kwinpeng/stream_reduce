@@ -1,4 +1,4 @@
-#include "kernels/reducebykey.cuh"
+#include "kernels/reducevoxelbycoord.cuh"
 
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
@@ -193,17 +193,17 @@ int mgpu_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
     cudaMalloc((void**)&counts, sizeof(int));
 
 	context.Start();
-    ReduceByKey(raw_dev_cors,
-                raw_dev_vxls,
-                BATCH_SIZE * imgsize * VERTICES,
-                Voxel(),
-                mgpu::plus<Voxel>(),
-                mgpu::equal_to<CRSCoord>(),
-                raw_r_dev_cors,
-                raw_r_dev_vxls,
-                (int*)0,
-                counts,
-                context);
+    ReduceVoxelByCoord(raw_dev_cors,
+                       raw_dev_vxls,
+                       BATCH_SIZE * imgsize * VERTICES,
+                       Voxel(),
+                       mgpu::plus<Voxel>(),
+                       mgpu::equal_to<CRSCoord>(),
+                       raw_r_dev_cors,
+                       raw_r_dev_vxls,
+                       (int*)0,
+                       counts,
+                       context);
 	double milliseconds = context.Split();
 
     std::cout << "MGPU reduce done with time consumed: "
@@ -313,9 +313,9 @@ int main(int argc, char *argv[])
     int tlen = thrust_reduce(raw_dev_cors, raw_dev_vxls,
                              raw_r_dev_cors, raw_r_dev_vxls);
 
-    record(r_coords, raw_r_dev_cors,
-           r_voxels, raw_r_dev_vxls,
-           tlen, "thrust-result.txt");
+    //record(r_coords, raw_r_dev_cors,
+    //       r_voxels, raw_r_dev_vxls,
+    //       tlen, "thrust-result.txt");
 
     /* mgpu reduce */
 	ContextPtr context = CreateCudaDevice(argc, argv, true);
@@ -323,9 +323,9 @@ int main(int argc, char *argv[])
     int mlen = mgpu_reduce(raw_dev_cors, raw_dev_vxls,
                            raw_r_dev_cors, raw_r_dev_vxls, *context);
 
-    record(r_coords, raw_r_dev_cors,
-           r_voxels, raw_r_dev_vxls,
-           mlen, "mgpu-result.txt");
+    //record(r_coords, raw_r_dev_cors,
+    //       r_voxels, raw_r_dev_vxls,
+    //       mlen, "mgpu-result.txt");
 
     if (tlen != mlen)
         printf("reduced length not equal, thrust: %d, mgpu: %d\n", tlen, mlen);

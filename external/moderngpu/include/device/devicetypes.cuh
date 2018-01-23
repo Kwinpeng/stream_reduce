@@ -135,7 +135,7 @@ struct minimum : public std::binary_function<T, T, T> {
 ////////////////////////////////////////////////////////////////////////////////
 
 template<typename T>
-MGPU_HOST_DEVICE void swap(T& a, T& b) {
+MGPU_HOST_DEVICE void Swap(T& a, T& b) {
 	T c = a;
 	a = b;
 	b = c;

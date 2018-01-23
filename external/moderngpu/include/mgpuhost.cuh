@@ -699,6 +699,20 @@ MGPU_HOST void ReduceByKeyApply(const ReduceByKeyPreprocessData& preprocess,
 	CudaContext& context);
 
 ////////////////////////////////////////////////////////////////////////////////
+// interface for scalethunder
+template<typename KeysIt, typename InputIt, typename DestIt,
+    typename KeyType, typename ValType, typename Op, typename Comp>
+MGPU_HOST void ReduceVoxelByCoord(KeysIt keys_global, InputIt data_global, int count,
+    ValType identity, Op op, Comp comp, KeyType* keysDest_global, 
+    DestIt dest_global, int* count_host, int* count_global, 
+    CudaContext& context);
+
+template<typename ValType, typename KeyType, typename KeysIt, typename Comp>
+MGPU_HOST void ReduceVoxelByCoordPreprocess(int count, KeysIt keys_global, 
+    KeyType* keysDest_global, Comp comp, int* count_host, int* count_global,
+    std::unique_ptr<ReduceByKeyPreprocessData>* ppData, CudaContext& context);
+
+////////////////////////////////////////////////////////////////////////////////
 // kernels/spmvcsr.cuh
 
 typedef SegReducePreprocessData SpmvPreprocessData;

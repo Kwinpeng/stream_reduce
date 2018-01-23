@@ -54,8 +54,8 @@ MGPU_DEVICE void OddEvenTransposeSort(T* keys, V* values, Comp comp) {
 		#pragma unroll
 		for(int i = 1 & level; i < VT - 1; i += 2) {
 			if(comp(keys[i + 1], keys[i])) {
-				mgpu::swap(keys[i], keys[i + 1]);
-				mgpu::swap(values[i], values[i + 1]);
+				mgpu::Swap(keys[i], keys[i + 1]);
+				mgpu::Swap(values[i], values[i + 1]);
 			}
 		}
 	}
@@ -71,8 +71,8 @@ struct OddEvenTransposeSortT {
 		#pragma unroll
 		for(int i = 1 & I; i < VT - 1; i += 2)
 			if((0 == ((2<< i) & flags)) && comp(keys[i + 1], keys[i])) {
-				mgpu::swap(keys[i], keys[i + 1]);
-				mgpu::swap(values[i], values[i + 1]);
+				mgpu::Swap(keys[i], keys[i + 1]);
+				mgpu::Swap(values[i], values[i + 1]);
 			}
 		OddEvenTransposeSortT<I + 1, VT>::Sort(keys, values, flags, comp);
 	}
@@ -107,8 +107,8 @@ struct OddEvenMergesortT {
 			// means the keys are in different segments and must not be swapped.
 			const int Mask = ((2<< b) - 1) ^ ((2<< a) - 1);
 			if(!(Mask & flags) && comp(keys[b], keys[a])) {
-				mgpu::swap(keys[b], keys[a]);
-				mgpu::swap(values[b], values[a]);
+				mgpu::Swap(keys[b], keys[a]);
+				mgpu::Swap(values[b], values[a]);
 			}
 		}
 	}

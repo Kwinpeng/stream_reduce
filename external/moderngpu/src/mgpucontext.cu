@@ -49,7 +49,8 @@ double CudaTimer::Split() {
 	float t;
 	cudaEventElapsedTime(&t, start, end);
 	start.Swap(end);
-	return (t / 1000.0);
+	//return (t / 1000.0);
+	return t; 
 }
 double CudaTimer::Throughput(int count, int numIterations) {
 	double elapsed = Split();
