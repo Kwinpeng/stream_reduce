@@ -38,36 +38,36 @@ const int imgsize = 500 * (500 / 2 + 1);
 /////////////////////////////////////////////////////////////////
 
 typedef int CRSCoord;
-typedef double Voxel;
+//typedef double Voxel;
 
-//class Voxel {
-//    public:
-//        __host__ __device__ __forceinline__
-//        Voxel(double r = 0, double i = 0, double w = 0) {
-//            real = r; imag = i; weit = w;
-//        }
-//
-//        __host__ __device__ __forceinline__
-//        Voxel operator+(const Voxel& that) const {
-//            return Voxel(real + that.real,
-//                         imag + that.imag,
-//                         weit + that.weit);
-//        }
-//
-//        __host__ __device__ __forceinline__
-//        Voxel& operator+=(const Voxel& that) {
-//            real += that.real;
-//            imag += that.imag;
-//            weit += that.weit;
-//            
-//            return *this;
-//        }
-//
-//    public:
-//        double real;
-//        double imag;
-//        double weit;
-//};
+class Voxel {
+    public:
+        __host__ __device__ __forceinline__
+        Voxel(double r = 0, double i = 0, double w = 0) {
+            real = r; imag = i; weit = w;
+        }
+
+        __host__ __device__ __forceinline__
+        Voxel operator+(const Voxel& that) const {
+            return Voxel(real + that.real,
+                         imag + that.imag,
+                         weit + that.weit);
+        }
+
+        __host__ __device__ __forceinline__
+        Voxel& operator+=(const Voxel& that) {
+            real += that.real;
+            imag += that.imag;
+            weit += that.weit;
+            
+            return *this;
+        }
+
+    public:
+        double real;
+        double imag;
+        double weit;
+};
 
 /////////////////////////////////////////////////////////////////
 
@@ -78,6 +78,7 @@ int read_data_stream(CRSCoord *coords, Voxel *voxels)
 
     const int total_size = BATCH_SIZE * imgsize * VERTICES;
 
+    std::cout << "Data reading begin..." << std::endl;
     steady_clock::time_point begin = steady_clock::now();
 
     if (fcor && fvxl) {
@@ -112,11 +113,35 @@ int read_data_stream(CRSCoord *coords, Voxel *voxels)
     //    printf("coord:%10d, voxel:%15.6f\n", coords[i], voxels[i]);
 
     steady_clock::time_point end = steady_clock::now();
-    std::cout << "Data reading done! time consumed: "
+    std::cout << "Data reading done with time consumed: "
               << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()
               << "ms" << std::endl;
 
     return total_size;
+}
+
+void voxels_reshape(Voxel *voxels)
+{
+    const int total_size = BATCH_SIZE * imgsize * VERTICES;
+
+    std::cout << "Data reshaping begin..." << std::endl;
+    steady_clock::time_point begin = steady_clock::now();
+
+    double *temp = (double*)malloc(total_size * sizeof(Voxel));
+    for (int i = 0; i < total_size; ++i) {
+        temp[i] = voxels[i].real;
+        temp[total_size + i] = voxels[i].imag;
+        temp[total_size * 2 + i] = voxels[i].weit;
+    }
+
+    memcpy(voxels, temp, total_size * sizeof(Voxel));
+
+    free(temp);
+
+    steady_clock::time_point end = steady_clock::now();
+    std::cout << "Data reshaped done with time consumed: "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()
+              << "ms" << std::endl;
 }
 
 void record(CRSCoord *coords, CRSCoord *dev_coords,
@@ -140,7 +165,7 @@ void record(CRSCoord *coords, CRSCoord *dev_coords,
                cudaMemcpyDeviceToHost);
 
     for (int i = 0; i < length; ++i) {
-        fprintf(fp, "coord:%10d, voxel:%15.6f\n", coords[i], voxels[i]);
+        fprintf(fp, "coord:%10d, voxel:%15.6f\n", coords[i], voxels[i].real);
     }
 
     fclose(fp);
@@ -185,8 +210,8 @@ void partial_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
     ;
 }
 
-int mgpu_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
-                CRSCoord *raw_r_dev_cors, Voxel *raw_r_dev_vxls,
+int mgpu_reduce(CRSCoord *raw_dev_cors,   double *raw_dev_vxls,
+                CRSCoord *raw_r_dev_cors, double *raw_r_dev_vxls,
                 CudaContext& context)
 {
     int *counts;
@@ -196,8 +221,8 @@ int mgpu_reduce(CRSCoord *raw_dev_cors,   Voxel *raw_dev_vxls,
     ReduceVoxelByCoord(raw_dev_cors,
                        raw_dev_vxls,
                        BATCH_SIZE * imgsize * VERTICES,
-                       Voxel(),
-                       mgpu::plus<Voxel>(),
+                       (double)0,
+                       mgpu::plus<double>(),
                        mgpu::equal_to<CRSCoord>(),
                        raw_r_dev_cors,
                        raw_r_dev_vxls,
@@ -313,19 +338,24 @@ int main(int argc, char *argv[])
     int tlen = thrust_reduce(raw_dev_cors, raw_dev_vxls,
                              raw_r_dev_cors, raw_r_dev_vxls);
 
-    //record(r_coords, raw_r_dev_cors,
-    //       r_voxels, raw_r_dev_vxls,
-    //       tlen, "thrust-result.txt");
+    record(r_coords, raw_r_dev_cors,
+           r_voxels, raw_r_dev_vxls,
+           tlen, "thrust-result.txt");
 
     /* mgpu reduce */
 	ContextPtr context = CreateCudaDevice(argc, argv, true);
 
-    int mlen = mgpu_reduce(raw_dev_cors, raw_dev_vxls,
-                           raw_r_dev_cors, raw_r_dev_vxls, *context);
+    voxels_reshape(voxels);
 
-    //record(r_coords, raw_r_dev_cors,
-    //       r_voxels, raw_r_dev_vxls,
-    //       mlen, "mgpu-result.txt");
+    int mlen = mgpu_reduce(raw_dev_cors,
+                           (double*)raw_dev_vxls,
+                           raw_r_dev_cors,
+                           (double*)raw_r_dev_vxls,
+                           *context);
+
+    record(r_coords, raw_r_dev_cors,
+           r_voxels, raw_r_dev_vxls,
+           mlen, "mgpu-result.txt");
 
     if (tlen != mlen)
         printf("reduced length not equal, thrust: %d, mgpu: %d\n", tlen, mlen);

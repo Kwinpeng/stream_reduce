@@ -4,7 +4,7 @@ MGPU_DIR := external/moderngpu
 
 INCLUDES := -I $(MGPU_DIR)/include
 
-GENCODE_SM50  := -gencode arch=compute_30,code=sm_30
+GENCODE_SM50  := -gencode arch=compute_35,code=sm_35
 #GENCODE_SM52  := -gencode arch=compute_52,code=sm_52
 #GENCODE_SM60  := -gencode arch=compute_60,code=sm_60
 
