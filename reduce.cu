@@ -354,9 +354,9 @@ int main(int argc, char *argv[])
     int tlen = thrust_reduce(raw_dev_cors, raw_dev_vxls,
                              raw_r_dev_cors, raw_r_dev_vxls);
 
-    record(r_coords, raw_r_dev_cors,
-           r_voxels, raw_r_dev_vxls,
-           tlen, "thrust-result.txt");
+    //record(r_coords, raw_r_dev_cors,
+    //       r_voxels, raw_r_dev_vxls,
+    //       tlen, "thrust-result.txt");
 
     /* ---------------------------------------------------- *
      * mgpu reduce
@@ -377,9 +377,9 @@ int main(int argc, char *argv[])
                            (double*)raw_r_dev_vxls,
                            *context);
 
-    record(r_coords, raw_r_dev_cors,
-           r_voxels, raw_r_dev_vxls,
-           mlen, "mgpu-result.txt", true);
+    //record(r_coords, raw_r_dev_cors,
+    //       r_voxels, raw_r_dev_vxls,
+    //       mlen, "mgpu-result.txt", true);
 
     if (tlen != mlen)
         printf("reduced length not equal, thrust: %d, mgpu: %d\n", tlen, mlen);

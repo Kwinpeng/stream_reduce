@@ -72,6 +72,30 @@ MGPU_HOST void ReduceVoxelByCoordPreprocess(int count, KeysIt keys_global,
 
 ////////////////////////////////////////////////////////////////////////////////
 // ReduceByKey host function.
+template<typename InputIt, typename DestIt, typename T, typename Op>
+MGPU_HOST void NoEmptySegReduceApply(const SegReducePreprocessData& preprocess, 
+	InputIt data_global, T identity, Op op, DestIt dest_global,
+	CudaContext& context) {
+
+	typedef typename SegReducePreprocessTuning<sizeof(T)>::Tuning Tuning;
+	int2 launch = Tuning::GetLaunchParams(context);
+    
+    // No empties.
+	MGPU_MEM(T) carryOutDevice = context.Malloc<T>(preprocess.numBlocks);
+	KernelSegReduceApply<Tuning>
+		<<<preprocess.numBlocks, launch.x, 0, context.Stream()>>>(
+		preprocess.threadCodesDevice->get(), preprocess.count, 
+		preprocess.limitsDevice->get(), data_global, identity, op, 
+		dest_global, carryOutDevice->get());
+	MGPU_SYNC_CHECK("KernelSegReduceApply");
+
+	// Add the carry-in values.
+	SegReduceSpine(preprocess.limitsDevice->get(), preprocess.numBlocks, 
+		dest_global, carryOutDevice->get(), identity, op, context);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ReduceByKey host function.
 
 template<typename KeysIt, typename InputIt, typename DestIt,
     typename KeyType, typename ValType, typename Op, typename Comp>
@@ -103,7 +127,7 @@ MGPU_HOST void ReduceVoxelByCoord(KeysIt keys_global, InputIt data_global, int c
     for (int sec = 0; sec < 3; ++sec) {
         InputIt data_section = data_global + sec * count;
         DestIt  dest_section = dest_global + sec * count;
-        SegReduceApply(*data, data_section, identity, op, dest_section, context);
+        NoEmptySegReduceApply(*data, data_section, identity, op, dest_section, context);
     }
 
     // Evaluate the segmented reduction.

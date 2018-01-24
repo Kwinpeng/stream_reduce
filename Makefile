@@ -1,5 +1,7 @@
 CC = nvcc
 
+FLAGS := -std=c++11
+
 MGPU_DIR := external/moderngpu
 
 INCLUDES := -I $(MGPU_DIR)/include
@@ -10,7 +12,7 @@ GENCODE_SM50  := -gencode arch=compute_35,code=sm_35
 
 GENCODE_FLAGS := $(GENCODE_SM50) $(GENCODE_SM52) $(GENCODE_SM60)
 
-NVCCFLAGS	  += -std=c++11 $(GENCODE_FLAGS) $(INCLUDES)
+NVCCFLAGS	  += $(FLAGS) $(GENCODE_FLAGS) $(INCLUDES)
 
 all: Reduce
 
